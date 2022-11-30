@@ -1,4 +1,5 @@
 import math
+import time
 
 from numpy import uint8, uint64, dtype, uint16
 import numpy as np
@@ -10,17 +11,17 @@ class BitMap:
     tot_bit_width: int
     arr_size: int
 
-    def __init__(self, arr: np.array, py_list: list, py_int: int):
+    def __init__(self, element):
 
-        if py_list:
-            self.array = py_list
-        elif py_int:
-            self.array = BitMap.__to_np_array(py_int)
+        if isinstance(element, list):
+            self.array = element
+        elif isinstance(element, int):
+            self.array = BitMap.__to_np_array(element)
         else:
-            self.array = arr
+            self.array = element
 
-        self.arr_size = len(arr)
-        self.elem_bit_width = arr[0].dtype.itemsize * 8
+        self.arr_size = len(self.array)
+        self.elem_bit_width = self.array[0].dtype.itemsize * 8
         self.tot_bit_width = self.elem_bit_width * self.arr_size
 
     def __setitem__(self, key, value):
@@ -89,26 +90,85 @@ class BitMap:
         mask = uint8(mask << 7)
         mask = uint8(mask >> 7)
         return mask
+    def first_index_of(self,key):
+        for i in range(len(self)):
+            if self[i] == key:
+                return i
+        return -1
+    def byte_size(self):
+        return self.tot_bit_width // 8
+
+    def get_byte(self, i: int) -> uint8:
+        byte = [uint8(0x00)]
+        byte_bitmap = BitMap(byte)
+        bitwise_copy(self, byte_bitmap, i * 8, 8, 0)
+        return byte[0]
+
+    def set_byte(self, i: int, value: uint8):
+        byte = [value]
+        byte_bitmap = BitMap(byte)
+        bitwise_copy(byte_bitmap, self, 0, 8, i * 8)
+
+    def __str__(self):
+        str_val = str(self[0])
+        for i in range(1, self.tot_bit_width):
+            if i % 8 == 0:
+                str_val += ' ' + str(self[i])
+            else:
+                str_val += str(self[i])
+        return str_val
+
+    def __lshift__(self, sha: int):
+        if sha > 8:
+            n = sha // 8
+            for i in range(n):
+                self << 8
+            sha %= 8
+
+        mask = uint8(0x00)
+        for i in range(sha):
+            mask = mask | uint8(0x80) >> i
+
+        prev_overflow = uint8(0x00)
+        for i in range(self.byte_size() - 1, -1, -1):
+            current = self.get_byte(i)
+            bits_where_going_to_overflow = current & mask
+            current = current << sha
+            prev_overflow = prev_overflow >> (8 - sha)
+            self.set_byte(i, uint8(current | prev_overflow))
+            prev_overflow = bits_where_going_to_overflow
+        return prev_overflow
+
+    def __len__(self):
+        return self.tot_bit_width
 
     @staticmethod
     def __to_np_array(py_int: int):
-        bit_stream = np.zeros(int(math.log2(py_int)) // 16 + 1, dtype=uint16)
+        if py_int < 0:
+            raise ValueError("Can not convert negative integer to bitmap.")
+
+        if py_int == 0:
+            size = 1
+        else:
+            size = int(math.log2(py_int)) // 8 + 1
+
+        bit_stream = np.zeros(size, dtype=uint8)
+
+        shift_amount = 2 ** 8
+
         for i in range(len(bit_stream) - 1, -1, -1):
-            overflow = uint16(0x0000)
-            overflow = overflow | bit_stream
-            bit_stream >>= 16
+            overflow = uint8(0x00)
+            tmp = py_int % shift_amount
+            overflow = overflow | tmp
+            py_int //= shift_amount
             bit_stream[i] = overflow
         return bit_stream
 
 
-def shift_bits_left(array, shift_amount: int):
-    bit_width_of_array = array[0].dtype.itemsize * len(array)
-    bitwise_copy(array, array, shift_amount, bit_width_of_array - shift_amount, 0)
-
-
-def bitwise_copy(source, dest, offset: int, size: int, dest_offset: int):
-    bitmap_src = BitMap(source)
-    bitmap_dst = BitMap(dest)
-
+def bitwise_copy(src: BitMap, dest: BitMap, offset: int, size: int, dest_offset: int):
+    j = 0
     for i in range(offset, offset + size, 1):
-        bitmap_dst[dest_offset + i] = bitmap_src[i]
+        dest[dest_offset + j] = src[i]
+        j += 1
+
+
